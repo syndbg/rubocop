@@ -1,4 +1,6 @@
 # encoding: utf-8
+require 'concurrent'
+require 'concurrent-edge'
 
 module RuboCop
   # This class handles the processing of files, which includes dealing with
@@ -53,14 +55,20 @@ module RuboCop
 
       formatter_set.started(files)
 
+      pool = Concurrent::CachedThreadPool.new
+
       files.each do |file|
-        break if aborting?
-        offenses = process_file(file)
-        all_passed = false if offenses.any? { |o| considered_failure?(o) }
-        inspected_files << file
-        break if @options[:fail_fast] && !all_passed
+        pool.post do
+          break if aborting?
+          offenses = process_file(file)
+          all_passed = false if offenses.any? { |o| considered_failure?(o) }
+          inspected_files << file
+          break if @options[:fail_fast] && !all_passed
+        end
       end
 
+      pool.shutdown
+      pool.wait_for_termination
       all_passed
     ensure
       ResultCache.cleanup(@config_store, @options[:debug]) if cached_run?
